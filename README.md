@@ -3,9 +3,15 @@ Special Lectures in International Relations A - Humanitarian Mapathon
 - [HOT OSM Sign Up](https://tasks.hotosm.org/login) - HOT OSM is what you will use to participate in the Mapathon by contributing to humanitarian mapping projects.
 - [Humanitarian Mapathon Tutorial (Slides)](https://docs.google.com/presentation/d/1hvdrJn3919JjNVKlmvOsJMK6EThPb4YNItOdfV69stk/edit?usp=sharing) - Use these tutorial slides to learn how to contribute to HOTOSM!
 - [OpenStreetMap Sign Up](https://www.openstreetmap.org/user/new) - Create an OSM account because it is required to use HOT OSM.
-- https://www.cdc.gov/mmwr/volumes/72/wr/mm7202a1.htm - implications
 
-## ukraine airstrikes
+## Map Generation
+- [Kepler.gl](https://kepler.gl/) - An open source tool for large-scale geospatial data sets.
+- [Felt](https://felt.com/) - A web platform for creating and sharing interactive maps.
+- [Google Earth](https://www.google.com/earth/outreach/learn/create-a-map-or-story-in-google-earth-web/) - Create a map or story in Google Earth Web.
+- [Mapbox](https://www.mapbox.com/) - A web platform for creating custom styled maps.
+- [QGIS](https://www.qgis.org/en/site/) - An open-source desktop app for creating maps.
+
+## Ukraine Airstrikes
 Airstrike density heatmap in Ukraine mapped against civilian locations including schools, hospitals, and infrastructure. Potentially doing time series for revealing strikes over time. 
 
 Solutions will involve evacuation zones, refugee locations and potential routes. By identifying high-risk zones where critical infrastructure overlaps with conflict, we can highlight areas most in need of protection and intervention.
