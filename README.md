@@ -14,10 +14,44 @@ Solutions will involve intervention zones” with suggested locations for:
 
 
 ## Required Components: 
+### The Challenge
+- create a map based or spatial visualization that
+    - identifies a real world crisis
+    - uses data to reveal the problem
+    - proposes a spatial solution
+    - explore not only what is wrong, but what could change
+
+## Focus Areas
+- war and conflict
+- climate change and natural disasters
+- inequality - income, education, access
+- migration and refugees
+- urban challenges (housing, transportation, aging populations)
+
+## Required Components
 - a visual spatial component
 - a problem perspective supported by data or evidence
 - a solution perspective w a realistic or imaginative intervention
 - a short narrative (3-5 sent)
 
+### Evaluation Criteria
+- strong impact story
+- good design
+- innovation
+
+### Format Options
+- poster/infographic
+- interactive website or web map
+- story map
+- mobile or web app
+- 3d visualization AR, or VR experience
+- youtube video/short documentary
+
+### Submission Requirements
+- post the final project and description on the event padlet
+- include a title
+- provide project link, file, or video
+- add a short narrative
+  
 ## Datasets
 - 
