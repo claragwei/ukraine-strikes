@@ -1,4 +1,4 @@
-# ukraine-airstrikes
+# ukraine-strikes
 Special Lectures in International Relations A - Humanitarian Mapathon 
 - [HOT OSM Sign Up](https://tasks.hotosm.org/login) - HOT OSM is what you will use to participate in the Mapathon by contributing to humanitarian mapping projects.
 - [Humanitarian Mapathon Tutorial (Slides)](https://docs.google.com/presentation/d/1hvdrJn3919JjNVKlmvOsJMK6EThPb4YNItOdfV69stk/edit?usp=sharing) - Use these tutorial slides to learn how to contribute to HOTOSM!
