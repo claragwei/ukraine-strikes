@@ -771,11 +771,14 @@ map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-ri
 const layerVis = { strikes: true, oblasts: false, idps: false, sites: false, hrp: false };
 let borderPoints = [];
 let localRoadGraph = null;
+let semanticNodes = [];
 
 const routeState = {
   picking: null, // "origin" | "destination" | null
   origin: null,
   destination: null,
+  destinationKind: null, // "border" | "medical" | "manual"
+  destinationName: null,
 };
 
 function coordKey(c) { return `${c[0].toFixed(5)},${c[1].toFixed(5)}`; }
@@ -822,11 +825,36 @@ function nearestGraphNode(coord) {
   return best;
 }
 
-function dijkstraPath(startIdx, endIdx) {
+function dijkstraDistances(startIdx) {
+  const n = localRoadGraph.nodes.length;
+  const dist = new Array(n).fill(Infinity);
+  const used = new Array(n).fill(false);
+  dist[startIdx] = 0;
+  for (let it = 0; it < n; it++) {
+    let v = -1;
+    let best = Infinity;
+    for (let i = 0; i < n; i++) {
+      if (!used[i] && dist[i] < best) { best = dist[i]; v = i; }
+    }
+    if (v < 0) break;
+    used[v] = true;
+    for (const e of localRoadGraph.edges[v]) {
+      const nd = dist[v] + e.w;
+      if (nd < dist[e.to]) dist[e.to] = nd;
+    }
+  }
+  return dist;
+}
+
+function dijkstraPath(startIdx, endIdx, opts = {}) {
+  const penaltyNodes = opts.penaltyNodes || null;
+  const penaltyKm = opts.penaltyKm || 0;
+  const blockedNodes = opts.blockedNodes || null;
   const n = localRoadGraph.nodes.length;
   const dist = new Array(n).fill(Infinity);
   const prev = new Array(n).fill(-1);
   const used = new Array(n).fill(false);
+  if (blockedNodes && (blockedNodes.has(startIdx) || blockedNodes.has(endIdx))) return null;
   dist[startIdx] = 0;
 
   for (let it = 0; it < n; it++) {
@@ -836,9 +864,15 @@ function dijkstraPath(startIdx, endIdx) {
       if (!used[i] && dist[i] < best) { best = dist[i]; v = i; }
     }
     if (v < 0 || v === endIdx) break;
+    if (blockedNodes && blockedNodes.has(v)) {
+      used[v] = true;
+      continue;
+    }
     used[v] = true;
     for (const e of localRoadGraph.edges[v]) {
-      const nd = dist[v] + e.w;
+      if (blockedNodes && blockedNodes.has(e.to)) continue;
+      const extra = penaltyNodes && penaltyNodes.has(e.to) ? penaltyKm : 0;
+      const nd = dist[v] + e.w + extra;
       if (nd < dist[e.to]) {
         dist[e.to] = nd;
         prev[e.to] = v;
@@ -855,12 +889,97 @@ function dijkstraPath(startIdx, endIdx) {
     cur = prev[cur];
   }
   pathIdx.reverse();
-  return pathIdx.map(i => localRoadGraph.nodes[i]);
+  return {
+    indices: pathIdx,
+    coords: pathIdx.map(i => localRoadGraph.nodes[i]),
+    distanceKm: dist[endIdx]
+  };
 }
 
 function setRouteStatus(msg) {
   const el = document.getElementById("route-status");
   if (el) el.textContent = msg;
+}
+
+function initSemanticNodes() {
+  const cityNodes = [
+    { name: "Kyiv", coordinates: [30.523, 50.450], kind: "city" },
+    { name: "Lviv", coordinates: [24.031, 49.842], kind: "city" },
+    { name: "Dnipro", coordinates: [35.046, 48.464], kind: "city" },
+    { name: "Kharkiv", coordinates: [36.230, 49.993], kind: "city" },
+    { name: "Poltava", coordinates: [34.551, 49.588], kind: "city" },
+    { name: "Odesa", coordinates: [30.732, 46.482], kind: "city" },
+    { name: "Mykolaiv", coordinates: [31.994, 46.975], kind: "city" },
+    { name: "Rivne", coordinates: [26.251, 50.619], kind: "city" },
+  ];
+  const medicalNodes = HRP_DATA.features
+    .filter(f => f?.properties?.kind === "medical" && f?.geometry?.type === "Point")
+    .map(f => ({
+      name: f.properties.name || "Medical center",
+      coordinates: f.geometry.coordinates,
+      kind: "medical"
+    }));
+  const borderNodes = borderPoints.map(b => ({
+    name: b.name || "Border crossing",
+    coordinates: b.coordinates,
+    kind: "border"
+  }));
+  const all = [...cityNodes, ...medicalNodes, ...borderNodes];
+  semanticNodes = all.map(n => ({
+    ...n,
+    graphIdx: nearestGraphNode(n.coordinates)
+  }));
+}
+
+function nearestSemanticByGraphDistance(type, fromCoord) {
+  const start = nearestGraphNode(fromCoord);
+  const d = dijkstraDistances(start);
+  const pool = semanticNodes.filter(n => n.kind === type);
+  if (!pool.length) return null;
+  let best = null;
+  let bestDist = Infinity;
+  for (const n of pool) {
+    const nd = d[n.graphIdx];
+    if (isFinite(nd) && nd < bestDist) {
+      best = n;
+      bestDist = nd;
+    }
+  }
+  return best ? { ...best, graphDistanceKm: bestDist } : null;
+}
+
+function nearestSemanticByEuclidean(type, fromCoord) {
+  const pool = semanticNodes.filter(n => n.kind === type);
+  if (!pool.length) return null;
+  let best = pool[0];
+  let bestD = sqDist(fromCoord, best.coordinates);
+  for (let i = 1; i < pool.length; i++) {
+    const d = sqDist(fromCoord, pool[i].coordinates);
+    if (d < bestD) { best = pool[i]; bestD = d; }
+  }
+  return best;
+}
+
+function semanticHopsFromPath(indices) {
+  if (!indices?.length || !semanticNodes.length) return [];
+  const indexPos = new Map();
+  indices.forEach((idx, i) => { if (!indexPos.has(idx)) indexPos.set(idx, i); });
+  const hits = [];
+  for (const s of semanticNodes) {
+    const pos = indexPos.get(s.graphIdx);
+    if (pos != null) hits.push({ ...s, pos });
+  }
+  hits.sort((a, b) => a.pos - b.pos);
+  const out = [];
+  const seen = new Set();
+  for (const h of hits) {
+    const key = `${h.kind}:${h.name}`;
+    if (!seen.has(key)) {
+      out.push(h);
+      seen.add(key);
+    }
+  }
+  return out;
 }
 
 const GROUPS = {
@@ -1108,20 +1227,20 @@ const HRP_DATA = { type:"FeatureCollection", features:[
 const LOCAL_ROADS = {
   type: "FeatureCollection",
   features: [
-    { type:"Feature", geometry:{ type:"LineString", coordinates:[[30.52,50.45],[30.30,50.39],[29.23,50.75],[27.65,50.75],[26.25,50.62],[25.32,50.62],[23.73,51.47]] }}, // Kyiv→Yahodyn
-    { type:"Feature", geometry:{ type:"LineString", coordinates:[[30.52,50.45],[31.16,51.23],[31.30,51.50]] }}, // Kyiv→Chernihiv
-    { type:"Feature", geometry:{ type:"LineString", coordinates:[[30.52,50.45],[31.32,51.49],[33.37,50.75],[34.58,50.47],[34.80,50.91]] }}, // Kyiv→Sumy
-    { type:"Feature", geometry:{ type:"LineString", coordinates:[[30.52,50.45],[32.04,49.44],[34.55,49.59],[36.23,49.99]] }}, // Kyiv→Poltava→Kharkiv
-    { type:"Feature", geometry:{ type:"LineString", coordinates:[[34.55,49.59],[33.42,49.07],[35.04,48.46]] }}, // Poltava→Kremenchuk→Dnipro
-    { type:"Feature", geometry:{ type:"LineString", coordinates:[[35.04,48.46],[34.45,47.45],[32.62,46.64]] }}, // Dnipro→Kherson
-    { type:"Feature", geometry:{ type:"LineString", coordinates:[[32.62,46.64],[31.99,46.97],[30.72,46.48]] }}, // Kherson→Mykolaiv→Odesa
-    { type:"Feature", geometry:{ type:"LineString", coordinates:[[35.04,48.46],[36.37,48.53],[37.56,48.74]] }}, // Dnipro→Donetsk axis
-    { type:"Feature", geometry:{ type:"LineString", coordinates:[[35.04,48.46],[34.96,48.06],[34.10,47.15]] }}, // Dnipro→South belt
-    { type:"Feature", geometry:{ type:"LineString", coordinates:[[30.72,46.48],[30.22,48.75],[28.48,49.23],[26.99,49.42],[24.03,49.84],[23.10,49.79]] }}, // Odesa→West corridor
-    { type:"Feature", geometry:{ type:"LineString", coordinates:[[26.99,49.42],[26.25,50.62]] }}, // Khmelnytskyi→Rivne
-    { type:"Feature", geometry:{ type:"LineString", coordinates:[[32.26,48.51],[33.42,49.07],[30.22,48.75],[28.48,49.23]] }}, // Kropyvnytskyi spine
-    { type:"Feature", geometry:{ type:"LineString", coordinates:[[36.23,49.99],[35.46,48.57],[35.04,48.46]] }}, // Kharkiv→Dnipro
-    { type:"Feature", geometry:{ type:"LineString", coordinates:[[24.03,49.84],[22.79,49.27]] }}, // Lviv→Medyka axis
+    { type:"Feature", geometry:{ type:"LineString", coordinates:[[30.52,50.45],[30.36,50.43],[30.09,50.46],[29.73,50.59],[29.23,50.75],[28.66,50.79],[27.98,50.77],[27.31,50.73],[26.80,50.69],[26.25,50.62],[25.78,50.63],[25.32,50.62],[24.77,50.82],[24.21,51.08],[23.73,51.47]] }}, // Kyiv→Yahodyn
+    { type:"Feature", geometry:{ type:"LineString", coordinates:[[30.52,50.45],[30.63,50.58],[30.73,50.73],[30.84,50.92],[30.95,51.10],[31.05,51.19],[31.16,51.23],[31.22,51.31],[31.30,51.50]] }}, // Kyiv→Chernihiv
+    { type:"Feature", geometry:{ type:"LineString", coordinates:[[30.52,50.45],[30.78,50.63],[31.08,50.89],[31.32,51.18],[31.32,51.49],[31.78,51.35],[32.40,51.10],[33.05,50.86],[33.37,50.75],[33.91,50.70],[34.26,50.57],[34.58,50.47],[34.69,50.69],[34.80,50.91]] }}, // Kyiv→Sumy
+    { type:"Feature", geometry:{ type:"LineString", coordinates:[[30.52,50.45],[30.97,50.12],[31.33,49.91],[31.67,49.70],[32.04,49.44],[32.68,49.51],[33.18,49.57],[33.84,49.61],[34.55,49.59],[35.00,49.67],[35.49,49.83],[35.92,49.92],[36.23,49.99]] }}, // Kyiv→Poltava→Kharkiv
+    { type:"Feature", geometry:{ type:"LineString", coordinates:[[34.55,49.59],[34.10,49.45],[33.77,49.24],[33.42,49.07],[33.61,48.94],[33.97,48.78],[34.46,48.62],[34.86,48.52],[35.04,48.46]] }}, // Poltava→Kremenchuk→Dnipro
+    { type:"Feature", geometry:{ type:"LineString", coordinates:[[35.04,48.46],[34.91,48.24],[34.77,48.01],[34.61,47.75],[34.45,47.45],[34.11,47.26],[33.62,47.07],[33.14,46.88],[32.62,46.64]] }}, // Dnipro→Kherson
+    { type:"Feature", geometry:{ type:"LineString", coordinates:[[32.62,46.64],[32.44,46.72],[32.27,46.82],[32.11,46.91],[31.99,46.97],[31.79,46.95],[31.60,46.92],[31.37,46.84],[31.06,46.74],[30.72,46.48]] }}, // Kherson→Mykolaiv→Odesa
+    { type:"Feature", geometry:{ type:"LineString", coordinates:[[35.04,48.46],[35.41,48.52],[35.78,48.56],[36.11,48.56],[36.37,48.53],[36.63,48.57],[36.92,48.64],[37.22,48.71],[37.56,48.74]] }}, // Dnipro→Donetsk axis
+    { type:"Feature", geometry:{ type:"LineString", coordinates:[[35.04,48.46],[35.01,48.30],[34.99,48.18],[34.96,48.06],[34.75,47.87],[34.57,47.66],[34.33,47.40],[34.10,47.15]] }}, // Dnipro→South belt
+    { type:"Feature", geometry:{ type:"LineString", coordinates:[[30.72,46.48],[30.57,46.83],[30.40,47.30],[30.29,47.90],[30.22,48.75],[29.93,48.91],[29.48,49.05],[29.00,49.17],[28.48,49.23],[27.98,49.30],[27.44,49.35],[26.99,49.42],[26.42,49.57],[25.94,49.67],[25.45,49.75],[24.98,49.80],[24.53,49.83],[24.03,49.84],[23.54,49.82],[23.10,49.79]] }}, // Odesa→West corridor
+    { type:"Feature", geometry:{ type:"LineString", coordinates:[[26.99,49.42],[26.83,49.66],[26.70,49.94],[26.57,50.20],[26.46,50.43],[26.33,50.55],[26.25,50.62]] }}, // Khmelnytskyi→Rivne
+    { type:"Feature", geometry:{ type:"LineString", coordinates:[[32.26,48.51],[32.64,48.67],[33.02,48.86],[33.42,49.07],[32.80,49.03],[32.20,48.94],[31.63,48.87],[31.03,48.81],[30.58,48.78],[30.22,48.75],[29.64,48.92],[29.05,49.09],[28.48,49.23]] }}, // Kropyvnytskyi spine
+    { type:"Feature", geometry:{ type:"LineString", coordinates:[[36.23,49.99],[36.08,49.76],[35.95,49.54],[35.84,49.30],[35.74,49.05],[35.64,48.83],[35.55,48.69],[35.46,48.57],[35.27,48.50],[35.04,48.46]] }}, // Kharkiv→Dnipro
+    { type:"Feature", geometry:{ type:"LineString", coordinates:[[24.03,49.84],[23.77,49.73],[23.53,49.62],[23.27,49.49],[23.00,49.37],[22.79,49.27]] }}, // Lviv→Medyka axis
   ]
 };
 
@@ -1231,6 +1350,7 @@ map.on("load", () => {
       borderPoints = data.features
         .filter(f => f?.properties?.t === "border" && f?.geometry?.type === "Point")
         .map(f => ({ name: f.properties.name || "Border crossing", coordinates: f.geometry.coordinates }));
+      initSemanticNodes();
       map.addSource("sites", { type: "geojson", data });
 
       // Air bases — white circle with amber ring
@@ -1311,7 +1431,7 @@ map.on("load", () => {
     source: "route-points",
     paint: {
       "circle-radius": ["match", ["get","kind"], "origin", 6.5, 6.5],
-      "circle-color": ["match", ["get","kind"], "origin", "#4cc9a8", "#d7f7ef"],
+      "circle-color": ["match", ["get","kind"], "origin", "#4d8dff", "#ffd6a0"],
       "circle-stroke-width": 1.8,
       "circle-stroke-color": "rgba(10,13,18,0.95)"
     }
@@ -1339,27 +1459,6 @@ map.on("load", () => {
     });
   }
 
-  function nearestTarget(type, fromCoord) {
-    const targetList = [];
-    if (type === "medical") {
-      for (const f of HRP_DATA.features) {
-        if (f?.properties?.kind === "medical" && f?.geometry?.type === "Point") {
-          targetList.push({ name: f.properties.name || "Medical center", coordinates: f.geometry.coordinates });
-        }
-      }
-    } else {
-      targetList.push(...borderPoints);
-    }
-    if (!targetList.length) return null;
-    let best = targetList[0];
-    let bestD = sqDist(fromCoord, best.coordinates);
-    for (let i = 1; i < targetList.length; i++) {
-      const d = sqDist(fromCoord, targetList[i].coordinates);
-      if (d < bestD) { bestD = d; best = targetList[i]; }
-    }
-    return best;
-  }
-
   function computeAndDrawRoute() {
     if (!routeState.origin || !routeState.destination) {
       setRouteStatus("Set origin and destination first.");
@@ -1367,14 +1466,51 @@ map.on("load", () => {
     }
     const s = nearestGraphNode(routeState.origin);
     const t = nearestGraphNode(routeState.destination);
-    const route = dijkstraPath(s, t);
-    if (!route || route.length < 2) {
-      clearRouteLine();
-      setRouteStatus("No local route found on current road network.");
+    let route = dijkstraPath(s, t);
+    if (routeState.destinationKind === "border") {
+      // Strictly prevent border routes from traversing medical hub nodes.
+      const blockedMedicalIdx = new Set(
+        semanticNodes
+          .filter(n => n.kind === "medical")
+          .map(n => n.graphIdx)
+      );
+      blockedMedicalIdx.delete(s);
+      blockedMedicalIdx.delete(t);
+      route = dijkstraPath(s, t, { blockedNodes: blockedMedicalIdx });
+      if (!route) {
+        // Fallback: allow medical nodes but heavily penalize them.
+        route = dijkstraPath(s, t, { penaltyNodes: blockedMedicalIdx, penaltyKm: 120 });
+      }
+    }
+    if (!route || route.coords.length < 2) {
+      // Final fallback: direct connector so the user still gets guidance.
+      drawRoutePath([routeState.origin.slice(), routeState.destination.slice()]);
+      const dstTxt = routeState.destinationName
+        ? ` target: ${routeState.destinationKind || "point"} (${routeState.destinationName}).`
+        : "";
+      setRouteStatus(`No connected road path found; drawing direct connector.${dstTxt}`);
       return;
     }
-    drawRoutePath(route);
-    setRouteStatus(`Route drawn (${Math.round(route.length)} waypoints).`);
+    const routed = route.coords.slice();
+    if (routeState.origin && routed.length) {
+      const first = routed[0];
+      if (sqDist(routeState.origin, first) > 1e-10) routed.unshift(routeState.origin.slice());
+    }
+    if (routeState.destination && routed.length) {
+      const last = routed[routed.length - 1];
+      if (sqDist(routeState.destination, last) > 1e-10) routed.push(routeState.destination.slice());
+    }
+    drawRoutePath(routed);
+    const hops = semanticHopsFromPath(route.indices)
+      .filter(h => routeState.destinationKind !== "border" || h.kind !== "medical")
+      .map(h => h.name)
+      .slice(0, 6)
+      .join(" -> ");
+    const hopTxt = hops ? ` | hops: ${hops}` : "";
+    const dstTxt = routeState.destinationName
+      ? ` target: ${routeState.destinationKind || "point"} (${routeState.destinationName}).`
+      : "";
+    setRouteStatus(`Route drawn (${route.distanceKm.toFixed(1)} km).${dstTxt}${hopTxt}`);
   }
 
   map.on("click", e => {
@@ -1382,10 +1518,16 @@ map.on("load", () => {
     const clicked = [e.lngLat.lng, e.lngLat.lat];
     if (routeState.picking === "origin") {
       routeState.origin = clicked;
+      routeState.destination = null;
+      routeState.destinationKind = null;
+      routeState.destinationName = null;
+      clearRouteLine();
       refreshRoutePoints();
       setRouteStatus("Origin set. Choose destination click or route nearest.");
     } else if (routeState.picking === "destination") {
       routeState.destination = clicked;
+      routeState.destinationKind = "manual";
+      routeState.destinationName = "Manual destination";
       refreshRoutePoints();
       computeAndDrawRoute();
     }
@@ -1405,13 +1547,21 @@ map.on("load", () => {
       setRouteStatus("Set origin first.");
       return;
     }
-    const t = document.getElementById("route-target-type")?.value || "border";
-    const target = nearestTarget(t, routeState.origin);
-    if (!target) {
-      setRouteStatus("No target points available yet.");
+    const t = document.getElementById("route-target-type")?.value === "medical" ? "medical" : "border";
+    const target = nearestSemanticByGraphDistance(t, routeState.origin);
+    const fallbackTarget = target || nearestSemanticByEuclidean(t, routeState.origin);
+    if (!fallbackTarget) {
+      routeState.destination = null;
+      routeState.destinationKind = null;
+      routeState.destinationName = null;
+      refreshRoutePoints();
+      clearRouteLine();
+      setRouteStatus(`No ${t} target points available.`);
       return;
     }
-    routeState.destination = target.coordinates.slice();
+    routeState.destination = fallbackTarget.coordinates.slice();
+    routeState.destinationKind = t;
+    routeState.destinationName = fallbackTarget.name || (t === "border" ? "Border crossing" : "Medical center");
     refreshRoutePoints();
     computeAndDrawRoute();
   });
@@ -1419,6 +1569,8 @@ map.on("load", () => {
     routeState.picking = null;
     routeState.origin = null;
     routeState.destination = null;
+    routeState.destinationKind = null;
+    routeState.destinationName = null;
     refreshRoutePoints();
     clearRouteLine();
     setRouteStatus("Route cleared.");
