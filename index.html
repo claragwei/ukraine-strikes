@@ -40,11 +40,14 @@
 html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(--paper); -webkit-font-smoothing: antialiased; }
 
 #app {
+  --left-w: 296px;
+  --right-w: 320px;
   display: grid;
   grid-template-rows: 42px 1fr;
-  grid-template-columns: 296px 1fr 320px;
+  grid-template-columns: minmax(0, var(--left-w)) minmax(420px, 1fr) minmax(0, var(--right-w));
   height: 100vh;
 }
+#app.left-collapsed { --left-w: 0px; }
 
 /* ══════════════════════════════════════════════════════════════
    HEADER
@@ -78,6 +81,18 @@ header {
   align-items: center;
   gap: 8px;
 }
+.h-btn {
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--dim);
+  background: transparent;
+  border: 1px solid var(--rule-s);
+  padding: 6px 8px;
+  cursor: pointer;
+}
+.h-btn:hover { color: var(--paper); border-color: var(--accent); }
 .h-tab {
   font-family: var(--mono);
   font-size: 9px;
@@ -106,6 +121,12 @@ header {
   flex-direction: column;
   scrollbar-width: thin;
   scrollbar-color: var(--faint) transparent;
+}
+#app.left-collapsed #sidebar {
+  width: 0;
+  min-width: 0;
+  border-right: none;
+  overflow: hidden;
 }
 #sidebar-right {
   grid-column: 3;
@@ -318,6 +339,31 @@ h1 em { font-style: italic; color: var(--dim); font-weight: 300; }
   grid-column: 2;
   position: relative;
   overflow: hidden;
+  min-width: 200px;
+  min-height: 200px;
+}
+@media (max-width: 1280px) {
+  #app { --right-w: 286px; }
+}
+@media (max-width: 1180px) {
+  #app { --left-w: 0px; --right-w: 260px; }
+  #sidebar {
+    width: 0;
+    min-width: 0;
+    border-right: none;
+    overflow: hidden;
+  }
+}
+@media (max-width: 1050px) {
+  #app { --left-w: 0px; --right-w: 0px; grid-template-columns: 1fr; }
+  #sidebar,
+  #sidebar-right {
+    width: 0;
+    min-width: 0;
+    border: none;
+    overflow: hidden;
+  }
+  #map-wrap { grid-column: 1; }
 }
 #map { width: 100%; height: 100%; }
 
@@ -441,6 +487,7 @@ h1 em { font-style: italic; color: var(--dim); font-weight: 300; }
     <span class="h-title">Ukraine Crisis Map</span>
     <span class="h-meta">Russian strikes and humanitarian planning overlays &nbsp;·&nbsp; Feb 2022–Apr 16, 2026</span>
     <nav class="h-nav">
+      <button class="h-btn" id="toggle-left-panel" type="button">Hide Brief</button>
       <a class="h-tab active" href="index.html">Map</a>
       <a class="h-tab" href="citations.html">Citations</a>
     </nav>
@@ -604,6 +651,7 @@ const END_DATE   = "2026-04-16";
 const START_MS   = new Date(START_DATE).getTime();
 const END_MS     = new Date(END_DATE + "T23:59:59Z").getTime();
 let strikeDates = [];
+const appEl = document.getElementById("app");
 
 function fmtNum(n) { return n != null ? (+n).toLocaleString() : "—"; }
 
@@ -644,6 +692,14 @@ function countStrikesThrough(dateStr) {
   return lo;
 }
 
+function setLeftPanelCollapsed(collapsed) {
+  if (!appEl) return;
+  appEl.classList.toggle("left-collapsed", collapsed);
+  const btn = document.getElementById("toggle-left-panel");
+  if (btn) btn.textContent = collapsed ? "Show Brief" : "Hide Brief";
+  requestAnimationFrame(() => map.resize());
+}
+
 
 // ══════════════════════════════════════════════════════════════════
 //  MAP INIT
@@ -679,7 +735,7 @@ const map = new maplibregl.Map({
     layers: [
       { id:"bg",         type:"background", paint:{"background-color":"#0a0d12"} },
       { id:"carto-dark", type:"raster",     source:"carto-dark",
-        paint:{"raster-opacity":0.82,"raster-saturation":-0.35} }
+        paint:{"raster-opacity":0.58,"raster-saturation":-0.45, "raster-contrast":0.08, "raster-brightness-max":0.85} }
     ]
   },
   center: [32.5, 49.2],
@@ -688,6 +744,9 @@ const map = new maplibregl.Map({
   maxZoom: 14,
   pitchWithRotate: false,
 });
+map.once("load", () => requestAnimationFrame(() => map.resize()));
+window.addEventListener("resize", () => map.resize());
+setTimeout(() => map.resize(), 220);
 
 map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
 
@@ -1351,6 +1410,11 @@ map.on("load", () => {
     setRouteStatus("Route cleared.");
   });
 
+  document.getElementById("toggle-left-panel")?.addEventListener("click", () => {
+    const next = !(appEl?.classList.contains("left-collapsed"));
+    setLeftPanelCollapsed(next);
+  });
+
   // ── HUMANITARIAN RESPONSE PLAN — inline, no fetch ─────────────────
   map.addSource("hrp", { type: "geojson", data: HRP_DATA });
 
@@ -1508,6 +1572,9 @@ map.on("load", () => {
       console.error("Failed to load strikes.geojson:", err);
       document.getElementById("strike-count").textContent = "strikes unavailable";
     });
+
+  console.log("map container size:", map.getContainer().clientWidth, map.getContainer().clientHeight);
+  map.resize();
 
 }); // map.on("load")
 </script>
