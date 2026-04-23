@@ -42,9 +42,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 #app {
   --left-w: 296px;
   --right-w: 320px;
-  display: grid;
-  grid-template-rows: 42px 1fr;
-  grid-template-columns: minmax(0, var(--left-w)) minmax(420px, 1fr) minmax(0, var(--right-w));
+  position: relative;
   height: 100vh;
 }
 #app.left-collapsed { --left-w: 0px; }
@@ -113,9 +111,14 @@ header {
    SIDEBAR
    ══════════════════════════════════════════════════════════════ */
 #sidebar {
-  grid-column: 1;
+  position: absolute;
+  left: 0;
+  top: 42px;
+  bottom: 0;
+  width: var(--left-w);
   background: var(--bg-panel);
   border-right: 1px solid var(--rule-s);
+  min-height: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -129,9 +132,14 @@ header {
   overflow: hidden;
 }
 #sidebar-right {
-  grid-column: 3;
+  position: absolute;
+  right: 0;
+  top: 42px;
+  bottom: 0;
+  width: var(--right-w);
   background: var(--bg-panel);
   border-left: 1px solid var(--rule-s);
+  min-height: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -336,11 +344,14 @@ h1 em { font-style: italic; color: var(--dim); font-weight: 300; }
    MAP AREA
    ══════════════════════════════════════════════════════════════ */
 #map-wrap {
-  grid-column: 2;
-  position: relative;
+  position: absolute;
+  top: 42px;
+  left: var(--left-w);
+  right: var(--right-w);
+  bottom: 0;
   overflow: hidden;
-  min-width: 200px;
-  min-height: 200px;
+  min-width: 320px;
+  min-height: 0;
 }
 @media (max-width: 1280px) {
   #app { --right-w: 286px; }
@@ -355,7 +366,7 @@ h1 em { font-style: italic; color: var(--dim); font-weight: 300; }
   }
 }
 @media (max-width: 1050px) {
-  #app { --left-w: 0px; --right-w: 0px; grid-template-columns: 1fr; }
+  #app { --left-w: 0px; --right-w: 0px; }
   #sidebar,
   #sidebar-right {
     width: 0;
@@ -363,9 +374,12 @@ h1 em { font-style: italic; color: var(--dim); font-weight: 300; }
     border: none;
     overflow: hidden;
   }
-  #map-wrap { grid-column: 1; }
+  #map-wrap { left: 0; right: 0; }
 }
-#map { width: 100%; height: 100%; }
+#map {
+  position: absolute;
+  inset: 0;
+}
 
 /* ══════════════════════════════════════════════════════════════
    TOOLTIP
